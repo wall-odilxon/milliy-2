@@ -1,0 +1,4 @@
+# Lokal sinov uchun (npm run cf:dev). Bu faylni ".dev.vars" nomi bilan nusxalang.
+# Haqiqiy Cloudflare'da bu qiymatlar "Secrets" sifatida kiritiladi (CLOUDFLARE.md ga qarang).
+TG_BOT_TOKEN=123456789:AAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+TG_CHAT_ID=123456789
