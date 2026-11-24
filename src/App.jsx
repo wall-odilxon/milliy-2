@@ -1,5 +1,5 @@
 // npm i lucide-react   (mavzu CSS o'zgaruvchilar orqali ishlaydi, Tailwind dark sozlamasi shart emas)
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import {
   ShoppingBag, Building2, User, Store, ShoppingBasket, Settings, Search, Home,
   ClipboardList, Phone, Send, MapPin, ShoppingCart, Plus, Minus, Check, ChevronLeft, ChevronRight, Tag, X,
@@ -14,13 +14,10 @@ import imgYoyol from "./assets/yoyol.jpg";
 import imgSalyami from "./assets/salyami.jpg";
 import imgJori from "./assets/jori.jpg";
 import { CATALOG } from "../shared/catalog.js"; // narxlar: shared/catalog.js
+import { ADDRESS, BRAND, PHONE, TELEGRAM } from "./config.js";
 
 /* ============ SOZLAMALAR: shu yerni o'zgartiring ============ */
-const BRAND = "Milliy"; // kampaniya nomi
 const DEMO = import.meta.env?.VITE_DEMO === "1"; // demo sahifada server yo'q, buyurtma faqat qurilmada saqlanadi
-const PHONE = "+998 88 330 58 58";
-const TELEGRAM = "N0_Name_030";
-const ADDRESS = "Manzilni shu yerga yozing";
 const REGIONS = ["Toshkent shahri", "Toshkent viloyati", "Andijon", "Buxoro", "Farg'ona", "Jizzax", "Xorazm", "Namangan", "Navoiy", "Qashqadaryo", "Qoraqalpog'iston", "Samarqand", "Sirdaryo", "Surxondaryo"];
 
 
@@ -91,9 +88,16 @@ const AD_STYLE = [
   { bg: "from-amber-600 to-orange-500", img: imgToorli },
   { bg: "from-red-950 to-red-700", img: imgStolichnaya },
 ];
+// Admin panel alohida yuklanadi (asosiy sayt og'irlashmaydi)
+const Admin = lazy(() => import("./Admin.jsx"));
+
 const IMAGES = [imgStolichnaya, imgOlimp, imgMilliy, imgToorli, imgYoyol, imgSalyami, imgJori];
 const PRODUCTS = CATALOG.map((c, i) => ({ ...c, image: IMAGES[i] }));
-const getProducts = (t) => PRODUCTS.map((p, i) => ({ ...p, id: i, ...t.products[i] }));
+// remote: bazadagi mahsulotlar (Cloudflare). Yo'q bo'lsa kod ichidagi ro'yxat ishlatiladi.
+const getProducts = (t, lang, remote) =>
+  Array.isArray(remote)
+    ? remote.map((p) => ({ id: p.id, name: p.name?.[lang] || p.name?.uz || "", desc: p.desc?.[lang] || p.desc?.uz || "", price: p.price, old: p.old || undefined, image: p.image || mascotImg }))
+    : PRODUCTS.map((p, i) => ({ ...p, id: i, ...t.products[i] }));
 const pct = (p) => Math.round((1 - p.price / p.old) * 100);
 
 /* ============ YORDAMCHILAR ============ */
@@ -376,7 +380,20 @@ function ContactFooter({ t }) {
   );
 }
 
-function HomeTab({ t, products, cart, onQty }) {
+function SkeletonGrid() {
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      {[0, 1, 2, 3].map((i) => (
+        <div key={i} className="animate-pulse overflow-hidden rounded-2xl bg-white ring-1 ring-slate-200">
+          <div className="aspect-square bg-slate-200" />
+          <div className="space-y-2 p-3"><div className="h-4 rounded bg-slate-200" /><div className="h-4 w-1/2 rounded bg-slate-200" /><div className="h-9 rounded-xl bg-slate-200" /></div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function HomeTab({ t, products, cart, onQty, loading }) {
   const [query, setQuery] = useState("");
   const [openId, setOpenId] = useState(null);
   const q = query.trim().toLowerCase();
@@ -398,10 +415,10 @@ function HomeTab({ t, products, cart, onQty }) {
           )} />
         </div>
       )}
-      <SpecialOffers t={t} items={found.filter((p) => p.old)} onOpen={setOpenId} />
+      <SpecialOffers t={t} items={loading ? [] : found.filter((p) => p.old)} onOpen={setOpenId} />
       <section className="px-4">
         <h2 className="mb-3 text-lg font-extrabold">{t.catalog}</h2>
-        {found.length === 0 ? <p className="rounded-2xl bg-white p-6 text-center text-slate-500">{t.noResult}</p> : (
+        {loading ? <SkeletonGrid /> : found.length === 0 ? <p className="rounded-2xl bg-white p-6 text-center text-slate-500">{t.noResult}</p> : (
           <div className="grid grid-cols-2 gap-3">
             {found.map((p) => <ProductCard key={p.id} t={t} p={p} qty={cart[p.id] || 0} onQty={(d) => onQty(p.id, d)} onOpen={() => setOpenId(p.id)} />)}
           </div>
@@ -463,7 +480,7 @@ function OrdersTab({ t, products, orders }) {
           <div className="mb-2 flex justify-between text-sm"><b className="text-slate-900">№{String(o.no).slice(-6)}</b><span className="text-slate-500">{o.date}</span></div>
           {o.items.map((it) => (
             <p key={it.id} className="flex items-center gap-2 py-1 text-sm text-slate-900">
-              <img src={products[it.id].image} alt="" className="h-8 w-8 rounded-lg object-cover" /><span className="flex-1 truncate">{products[it.id].name}</span><span className="text-slate-500">×{it.qty}</span>
+              <img src={it.image || products.find((p) => p.id === it.id)?.image || mascotImg} alt="" className="h-8 w-8 rounded-lg object-cover" /><span className="flex-1 truncate">{it.name || products.find((p) => p.id === it.id)?.name || `#${it.id}`}</span><span className="text-slate-500">×{it.qty}</span>
             </p>
           ))}
           <p className="mt-2 flex justify-between border-t border-slate-200 pt-2 font-bold text-slate-900"><span>{t.total}</span><span>{fmt(o.total, t.som)}</span></p>
@@ -649,7 +666,7 @@ function ReceiptModal({ t, info, onClose }) {
   );
 }
 
-export default function App() {
+function Shop() {
   const [lang, setLang] = useLocal("lang", "uz");
   const [profile, setProfile] = useLocal("profile", null);
   const [cart, setCart] = useLocal("cart", {}); // { productId: soni }
@@ -662,8 +679,30 @@ export default function App() {
   const [sendError, setSendError] = useState(null); // xato kodi (404, 503, 502, net...) yoki null
   const [done, setDone] = useState(null); // muvaffaqiyatli buyurtma ma'lumoti
   const t = T[lang];
-  const products = getProducts(t);
-  const cartCount = Object.values(cart).reduce((a, b) => a + b, 0);
+  const [remote, setRemote] = useState(undefined); // undefined: yuklanmoqda | null: baza yo'q (ichki ro'yxat) | massiv: bazadan
+  useEffect(() => {
+    if (DEMO) { setRemote(null); return undefined; }
+    let alive = true;
+    fetch("/api/products")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => alive && setRemote(Array.isArray(d?.products) ? d.products : null))
+      .catch(() => alive && setRemote(null));
+    return () => { alive = false; };
+  }, []);
+  const products = getProducts(t, lang, remote);
+  const lines = products.filter((p) => cart[p.id]).map((p) => ({ id: p.id, name: p.name, image: p.image, qty: cart[p.id], price: p.price }));
+  const cartTotal = lines.reduce((sum, l) => sum + l.price * l.qty, 0);
+  const cartCount = lines.reduce((sum, l) => sum + l.qty, 0);
+
+  // Admin o'chirib tashlagan mahsulotlar savatdan ham olib tashlanadi
+  useEffect(() => {
+    if (!Array.isArray(remote)) return;
+    const ids = new Set(remote.map((p) => p.id));
+    setCart((c) => {
+      const keys = Object.keys(c);
+      return keys.every((k) => ids.has(Number(k))) ? c : Object.fromEntries(keys.filter((k) => ids.has(Number(k))).map((k) => [k, c[k]]));
+    });
+  }, [remote]);
 
   const changeQty = (id, d) =>
     setCart((c) => {
@@ -673,8 +712,6 @@ export default function App() {
       return next;
     });
 
-  const lines = products.filter((p) => cart[p.id]).map((p) => ({ id: p.id, name: p.name, qty: cart[p.id], price: p.price }));
-  const cartTotal = lines.reduce((sum, l) => sum + l.price * l.qty, 0);
 
   // "Tasdiqlash" bosilganda: serverga yuboramiz; xato bo'lsa savat saqlanadi va qayta urinish mumkin
   const confirmOrder = async (customer, comment) => {
@@ -683,7 +720,7 @@ export default function App() {
     setSendError(null);
     const res = await submitOrder(customer, lines, comment);
     if (res.status === "fail") { setBusy(false); setSendError(res.code ?? "?"); return; }
-    const order = { no: res.no || Date.now(), date: new Date().toLocaleString(), items: lines.map(({ id, qty, price }) => ({ id, qty, price })), total: cartTotal, customer, tg: res.status };
+    const order = { no: res.no || Date.now(), date: new Date().toLocaleString(), items: lines.map(({ id, name, image, qty, price }) => ({ id, name, image, qty, price })), total: cartTotal, customer, tg: res.status };
     setOrders((o) => [order, ...o]);
     setCart({});
     setBusy(false);
@@ -699,7 +736,7 @@ export default function App() {
   else view = (
     <div className="mx-auto min-h-screen max-w-3xl">
       <AppHeader cartCount={cartCount} onCart={() => setTab("cart")} onSettings={() => setTab("settings")} />
-      {tab === "home" && <><HomeTab t={t} products={products} cart={cart} onQty={changeQty} /><ContactFooter t={t} /></>}
+      {tab === "home" && <><HomeTab t={t} products={products} cart={cart} onQty={changeQty} loading={remote === undefined} /><ContactFooter t={t} /></>}
       {tab === "cart" && <CartTab t={t} products={products} cart={cart} onQty={changeQty} onOrder={() => { setSendError(null); setCheckout(true); }} />}
       {tab === "orders" && <OrdersTab t={t} products={products} orders={orders} />}
       {tab === "settings" && <SettingsTab t={t} lang={lang} setLang={setLang} />}
@@ -712,3 +749,11 @@ export default function App() {
 
   return <div className="min-h-screen bg-slate-50 text-slate-900">{view}</div>;
 }
+
+export default function App() {
+  if (typeof window !== "undefined" && window.location.pathname.startsWith("/admin")) {
+    return <Suspense fallback={null}><Admin /></Suspense>;
+  }
+  return <Shop />;
+}
+

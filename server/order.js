@@ -1,18 +1,15 @@
 // Buyurtmani tekshirish va Telegramga yuborish. Ham lokal server (server/index.js),
-// ham Vercel funksiyasi (api/order.js) shu faylni ishlatadi.
+// Vercel funksiyasi (api/order.js) va Cloudflare Worker (worker/index.js) shu faylni ishlatadi.
 import { CATALOG } from "../shared/catalog.js";
 
 const clean = (v, max = 100) => String(v ?? "").replace(/[\u0000-\u001f]/g, " ").trim().slice(0, max);
 const money = (n) => `${n.toLocaleString("ru-RU")} so'm`;
 
-export const telegramConfigured = () => {
-  const token = String(process.env.TG_BOT_TOKEN || "").trim();
-  const chatId = String(process.env.TG_CHAT_ID || "").trim();
-  return /^\d+:[A-Za-z0-9_-]+$/.test(token) && /^-?\d+$/.test(chatId);
-};
+// env: Cloudflare Worker o'z `env` ob'ektini beradi; Vercel va lokal serverda process.env ishlatiladi
+export const telegramConfigured = (env = process.env) => Boolean(env.TG_BOT_TOKEN && env.TG_CHAT_ID);
 
 // Narx mijozdan OLINMAYDI, katalogdan olinadi.
-function parseOrder(body) {
+function parseOrder(body, catalog) {
   const c = body?.customer ?? {};
   const customer = {
     type: c.type === "legal" ? "legal" : "person",
@@ -28,7 +25,7 @@ function parseOrder(body) {
   const items = [];
   for (const it of body.items) {
     const id = Number(it?.id), qty = Number(it?.qty);
-    const p = CATALOG[id];
+    const p = catalog ? catalog.get(id) : CATALOG[id]; // catalog: Map (Cloudflare bazasi), bo'lmasa fayldagi ro'yxat
     if (!p || !Number.isInteger(qty) || qty < 1 || qty > 1000) return { error: "bad_items" };
     items.push({ name: p.name, price: p.price, qty });
   }
@@ -53,14 +50,12 @@ function buildMessage(no, { customer: c, comment, items }) {
 }
 
 // Natija: { status, body } — HTTP javobi sifatida qaytariladi
-export async function processOrder(rawBody) {
-  const { TG_API_BASE = "https://api.telegram.org" } = process.env;
-  const TG_BOT_TOKEN = String(process.env.TG_BOT_TOKEN || "").trim();
-  const TG_CHAT_ID = String(process.env.TG_CHAT_ID || "").trim();
-  if (!telegramConfigured()) return { status: 503, body: { error: "telegram_not_configured" } };
+export async function processOrder(rawBody, env = process.env, catalog) {
+  const { TG_BOT_TOKEN, TG_CHAT_ID, TG_API_BASE = "https://api.telegram.org" } = env;
+  if (!TG_BOT_TOKEN || !TG_CHAT_ID) return { status: 503, body: { error: "telegram_not_configured" } };
   let body = rawBody;
   if (typeof body === "string") { try { body = JSON.parse(body); } catch { return { status: 400, body: { error: "bad_json" } }; } }
-  const parsed = parseOrder(body);
+  const parsed = parseOrder(body, catalog);
   if (parsed.error) return { status: 400, body: { error: parsed.error } };
   const no = Date.now();
   const { text, total } = buildMessage(no, parsed);
